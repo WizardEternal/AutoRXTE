@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autorxte"
+version = "1.1.0"
+description = "Automated pipeline for RXTE X-ray data analysis"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "AutoRXTE Development Team"}
+]
+keywords = ["astronomy", "xray", "rxte", "data-analysis", "pipeline"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "numpy>=1.20.0",
+    "astropy>=5.0.0",
+    "astroquery>=0.4.6",
+    "boto3>=1.20.0",
+    "botocore>=1.23.0",
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/WizardEternal/AutoRXTE"
+"Bug Reports" = "https://github.com/WizardEternal/AutoRXTE/issues"
+"Source" = "https://github.com/WizardEternal/AutoRXTE"
+
+[project.scripts]
+autorxte = "autorxte.cli.main:main"
+
+[tool.setuptools]
+packages = ["autorxte", "autorxte.core", "autorxte.advanced", "autorxte.utils", "autorxte.cli"]
+
+[tool.setuptools.package-data]
+autorxte = ["*.yaml"]

@@ -1,0 +1,51 @@
+# AutoRXTE Config - Soft/Thermal Analysis
+# ============================================================================
+# Optimized for thermal-dominated states (high/soft state in BH binaries)
+# ============================================================================
+
+# Color analysis with focus on soft X-rays
+color_analysis:
+  # Energy ranges in CHANNEL IDs (NOT keV!)
+  # For soft source analysis:
+  #   Channels 0-5    ≈ 2-4 keV   (very soft)
+  #   Channels 6-15   ≈ 4-7 keV   (soft)
+  #   Channels 16-40  ≈ 7-15 keV  (medium)
+  ranges:
+    verysoft: "0-5"
+    soft: "6-15"
+    medium: "16-40"
+  
+  color_names:
+    - verysoft
+    - soft
+    - medium
+  
+  time_bin: 0.1     # Longer bins for fainter soft emission
+  workers: auto
+
+# XSPEC fitting with disk-dominated model
+xspec:
+  default_model: diskbb_powerlaw
+  
+  energy_range:
+    min: 2.5      # Include softer energies
+    max: 25.0
+  
+  models:
+    diskbb_powerlaw:
+      expression: "tbabs(diskbb + powerlaw)"
+      params:
+        nH: 3.0                      # Lower absorption
+        diskbb_kT: [0.8, 0.5, 2.0]  # Cooler disk
+        diskbb_norm: 800             # Stronger disk component
+        powerlaw_PhoIndex: 2.5       # Steeper power-law
+        powerlaw_norm: 5             # Weaker power-law
+
+# Stricter GTI filtering for clean soft X-ray data
+filtering:
+  filter_expression: "(ELV > 10) && (OFFSET < 0.05) && (NUM_PCU_ON > 2) && .NOT. ISNULL(ELV)"
+
+# Standard time resolution sufficient
+extraction:
+  time_bin: 0.01
+  workers: auto

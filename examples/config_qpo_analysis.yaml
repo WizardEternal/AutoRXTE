@@ -1,0 +1,66 @@
+# AutoRXTE Config - QPO Analysis
+# ============================================================================
+# Optimized for detecting and analyzing Quasi-Periodic Oscillations
+# ============================================================================
+
+# Standard color ranges
+color_analysis:
+  ranges:
+    soft: "0-13"
+    medium: "14-35"
+    hard: "36-255"
+  color_names: [soft, medium, hard]
+  time_bin: 0.001    # Very fine binning for QPOs
+  workers: auto
+
+# High-frequency PDS settings
+pds:
+  input_lightcurve: event.lc
+  binning: -1
+  rebin: -1.03
+  max_bins: 16384     # Maximum bins for freq resolution
+  window: none
+  norm: -2            # Leahy normalization standard for QPOs
+  workers: auto
+
+# Fine time resolution for event extraction
+extraction:
+  time_bin: 0.000125  # 125 microseconds for kHz QPOs
+  workers: auto
+  split_gti: false
+
+# Use Standard 2 for better time resolution
+lightcurves:
+  type: std2
+  std2:
+    output_name: light.lc
+    pcu_selection: 2
+    energy_channels: ALL
+    time_bins: 128     # Maximum time resolution
+
+# XSPEC - focus on continuum for QPO analysis
+xspec:
+  default_model: diskbb_powerlaw
+  energy_range:
+    min: 3.0
+    max: 30.0
+  save_plots: true
+
+# High-frequency power spectrum variant
+powspec_variants:
+  qpo_search:
+    binning: -1
+    max_bins: 16384
+    nyquist_freq: 4000   # Very high Nyquist for kHz QPOs
+    rebin: -1.01         # Fine rebinning
+  
+  low_freq_qpo:
+    binning: 0.1
+    max_bins: 8192
+    rebin: -1.05
+
+# Global settings for QPO analysis
+global:
+  auto_workers: true
+  log_level: INFO
+  cleanup_temp_files: false  # Keep intermediates for debugging

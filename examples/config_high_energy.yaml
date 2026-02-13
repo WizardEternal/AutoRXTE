@@ -1,0 +1,53 @@
+# AutoRXTE Config - High Energy Analysis
+# ============================================================================
+# Optimized for hard X-ray / high-energy analysis
+# ============================================================================
+
+# Color analysis with high-energy ranges
+color_analysis:
+  # Energy ranges in CHANNEL IDs (NOT keV!)
+  # For high-energy focus:
+  #   Channels 0-20   ≈ 2-7 keV   (low)
+  #   Channels 21-50  ≈ 7-18 keV  (medium)  
+  #   Channels 51-255 ≈ 18-60 keV (high)
+  ranges:
+    low: "0-20"
+    medium: "21-50"
+    high: "51-255"
+  
+  color_names:
+    - low
+    - medium
+    - high
+  
+  time_bin: 0.04
+  workers: auto
+
+# XSPEC fitting optimized for hard state
+xspec:
+  default_model: powerlaw_only
+  
+  energy_range:
+    min: 5.0      # Start at higher energy
+    max: 50.0     # Extend to higher energy
+  
+  models:
+    powerlaw_only:
+      expression: "tbabs*powerlaw"
+      params:
+        nH: 5.5
+        powerlaw_PhoIndex: 1.7    # Harder spectrum
+        powerlaw_norm: 15
+
+# PDS optimized for high-frequency QPOs  
+pds:
+  binning: -1
+  rebin: -1.03
+  max_bins: 16384    # More bins for high freq
+  norm: -2
+  workers: auto
+
+# Extract shorter time bins for fast variability
+extraction:
+  time_bin: 0.001    # 1 ms for fast timing
+  workers: auto

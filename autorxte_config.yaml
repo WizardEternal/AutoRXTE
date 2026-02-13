@@ -1,0 +1,442 @@
+# AutoRXTE Configuration File
+# ============================================================================
+# This file contains ALL configurable parameters for AutoRXTE modules.
+# Copy this file to your working directory as 'autorxte_config.yaml' and
+# customize as needed. Parameters are organized by module.
+# ============================================================================
+
+# ============================================================================
+# DOWNLOAD MODULE (download_01.py)
+# ============================================================================
+download:
+  # Default number of parallel download workers (auto = use CPU count)
+  workers: auto
+  
+  # Search parameters
+  search:
+    catalog: xtemaster
+    search_radius_arcmin: 5.0
+    
+  # Filter parameters (when using filters)
+  filter:
+    min_exposure_sec: 0.0
+    
+  # S3 configuration
+  s3:
+    bucket: nasa-heasarc
+    # Region: Will auto-detect on first download if not specified
+    # Fastest region is saved to ~/.autorxte/download_region.json
+    # Options: us-east-1, us-west-2, eu-west-1, ap-south-1, ap-southeast-1, ap-northeast-1
+    region: us-east-1
+    
+  # Auto-detection: Set to true to always auto-detect fastest region (slower first run)
+  # Set to false to use the region specified above or saved preference
+  auto_detect_region: false
+
+# ============================================================================
+# PREPARATION MODULE (preparation_02.py)
+# ============================================================================
+preparation:
+  # Parallel workers for pcaprepobsid
+  workers: auto
+  
+  # Skip existing results directories
+  skip_existing: true
+
+# ============================================================================
+# ORGANIZATION MODULE (organization_03.py)
+# ============================================================================
+organization:
+  # Move or copy fits_files.god
+  move_mode: true  # true = move, false = copy
+  
+  # Overwrite if exists
+  overwrite: false
+
+# ============================================================================
+# BITMASKS MODULE (bitmasks_04.py)
+# ============================================================================
+bitmasks:
+  # Default bitmask names for different modes
+  e_token_bitmask: bitmask_event
+  xenon_bitmask: bitmask_xenon
+  
+  # Overwrite existing bitmasks
+  overwrite: false
+
+# ============================================================================
+# FILTERING MODULE (filtering_05.py) - GTI CREATION
+# ============================================================================
+filtering:
+  # GTI filter expression
+  # CRITICAL: Do not change without understanding impact on analysis
+  filter_expression: "(ELV > 4) && (OFFSET < 0.1) && (NUM_PCU_ON > 0) && .NOT. ISNULL(ELV) && (NUM_PCU_ON < 6)"
+  
+  # Alternative filter expressions (uncomment to use)
+  # strict_filter: "(ELV > 10) && (OFFSET < 0.02) && (NUM_PCU_ON == 3)"
+  # relaxed_filter: "(ELV > 2) && (OFFSET < 0.2) && (NUM_PCU_ON > 0)"
+
+# ============================================================================
+# EXTRACTION MODULE (extraction_06.py) - EVENT EXTRACTION
+# ============================================================================
+extraction:
+  # Token mode: 'e' for E-token, 'xenon' for Good Xenon
+  token: e
+  
+  # Bitmask file name (in Analysis directory)
+  bitmask: bitmask_event
+  
+  # Output file prefix
+  prefix: event
+  
+  # Split GTI into separate files
+  split_gti: false
+  
+  # Parallel workers
+  workers: auto
+  
+  # Time binning for extraction (seconds)
+  # NOTE: This is NOT the final lightcurve binning
+  time_bin: 0.004
+  
+  # Use energy ranges (for color-color analysis)
+  use_ranges: false
+
+# ============================================================================
+# LIGHTCURVES MODULE (lightcurves_07.py)
+# ============================================================================
+lightcurves:
+  # Lightcurve type: 'std1' or 'std2'
+  type: std2
+  
+  # Standard 1 parameters
+  std1:
+    output_name: std1.lc
+    pcu_selection: 2          # PCU number (2 is most reliable)
+    bin_size_sec: 0.125       # Time bin size in seconds
+  
+  # Standard 2 parameters
+  std2:
+    output_name: light.lc
+    pcu_selection: 2          # PCU number
+    energy_channels: ALL      # Energy channels (ALL or specific range)
+    time_bins: 16             # Number of time bins
+
+# ============================================================================
+# SPECTRA MODULE (spectra_08.py)
+# ============================================================================
+spectra:
+  # PCU selection (2 = PCU2, most reliable)
+  pcu_selection: 2
+  
+  # Energy channels to extract
+  energy_channels: ALL
+  
+  # Output file names
+  source_file: src.pha
+  background_file: bkg.pha
+  response_file: rsp.pha
+
+# ============================================================================
+# PDS MODULE (pds_09.py) - POWER DENSITY SPECTRUM
+# ============================================================================
+pds:
+  # Input lightcurve file
+  input_lightcurve: event.lc
+  
+  # Binning (-1 = auto)
+  binning: -1
+  
+  # Rebin factor
+  rebin: -1.03
+  
+  # Maximum number of bins
+  max_bins: 8192
+  
+  # Newbin interval (for rebinning)
+  newbin: INDEF
+  
+  # Window function
+  window: none
+  
+  # Normalization (-2 = Leahy normalization)
+  norm: -2
+  
+  # Output files
+  output_png: pds.png/png
+  output_fps: event.fps
+  output_qdp: event.qdp
+  
+  # PDS source and response files
+  pds_source: pds-src.pha
+  pds_response: pds-rsp.pha
+  
+  # Parallel workers
+  workers: auto
+
+# ============================================================================
+# COLOR-COLOR ANALYSIS (advanced/color_color.py)
+# ============================================================================
+color_analysis:
+  # Energy ranges in CHANNEL IDs (NOT keV!)
+  # RXTE PCA channels: 0-255
+  # Approximate energy conversion (varies by gain epoch):
+  #   Channels 0-13   ≈ 2-6 keV   (soft)
+  #   Channels 14-35  ≈ 6-13 keV  (medium)
+  #   Channels 36-255 ≈ 13-60 keV (hard)
+  ranges:
+    soft: "0-13"
+    medium: "14-35"
+    hard: "36-255"
+  
+  # Alternative range definitions (uncomment to use)
+  # For high-energy analysis:
+  # ranges_high_energy:
+  #   low: "0-20"
+  #   mid: "21-50"
+  #   high: "51-255"
+  
+  # For very soft sources:
+  # ranges_soft:
+  #   verysoft: "0-5"
+  #   soft: "6-15"
+  #   medium: "16-40"
+  
+  # Output color names (must match number of ranges)
+  color_names:
+    - soft
+    - medium
+    - hard
+  
+  # Extraction parameters
+  time_bin: 0.04              # Time binning in seconds
+  
+  # Plotting parameters
+  lcurve_bin_size: -1         # -1 = auto
+  max_bins: 2000000
+  plot_format: png            # png or eps
+  
+  # Workers
+  workers: auto
+
+# ============================================================================
+# XSPEC FITTING (advanced/xspec_fit.py)
+# ============================================================================
+xspec:
+  # Default model
+  # Options: diskbb_pexrav, diskbb_powerlaw, diskbb_only, powerlaw_only, comptt
+  default_model: diskbb_pexrav
+  
+  # Energy range for fitting (keV)
+  energy_range:
+    min: 3.0
+    max: 30.0
+  
+  # Model definitions
+  models:
+    diskbb_pexrav:
+      expression: "tbabs(diskbb + pexrav)"
+      description: "Disk blackbody + reflection (black holes)"
+      # Initial parameters [value, min, max] or value
+      params:
+        nH: [5.5, 2.0, 10.0]           # Column density (10^22 cm^-2)
+        diskbb_kT: [1.2, 1.0, 4.0]     # Disk temperature (keV)
+        diskbb_norm: 400                # Disk normalization
+        pexrav_PhoIndex: [2.0, 1.3, 4.0] # Photon index
+        pexrav_foldE: 30                # Folding energy (keV)
+        pexrav_rel_refl: 1              # Reflection fraction
+        pexrav_cosIncl: 0.25            # Cosine inclination (frozen)
+        pexrav_norm: 15                 # Power-law normalization
+    
+    diskbb_powerlaw:
+      expression: "tbabs(diskbb + powerlaw)"
+      description: "Disk blackbody + power-law"
+      params:
+        nH: 5.5
+        diskbb_kT: 1.2
+        diskbb_norm: 400
+        powerlaw_PhoIndex: 2.0
+        powerlaw_norm: 15
+    
+    diskbb_only:
+      expression: "tbabs*diskbb"
+      description: "Disk blackbody only"
+      params:
+        nH: 5.5
+        diskbb_kT: 1.2
+        diskbb_norm: 400
+    
+    powerlaw_only:
+      expression: "tbabs*powerlaw"
+      description: "Power-law only"
+      params:
+        nH: 5.5
+        powerlaw_PhoIndex: 2.0
+        powerlaw_norm: 15
+  
+  # Fitting parameters
+  max_iterations: 1000
+  
+  # Save options
+  save_plots: true
+  plot_format: png            # png or cps
+  save_bestfit: true
+  output_csv: xspec_results.csv
+  
+  # Flux calculation energy bands (keV)
+  flux_bands:
+    - [3.0, 10.0]
+    - [3.0, 30.0]
+    - [10.0, 30.0]
+
+# ============================================================================
+# XENON MODE (advanced/xenon_mode.py)
+# ============================================================================
+xenon:
+  # FITS extension to read
+  fits_extension: XTE_SP
+  
+  # make_se parameters
+  output_root: event
+  
+  # Event file pattern for listing
+  event_pattern: xenon_event_gx*
+  
+  # File names
+  xenon_god_file: xenon_files.god
+  event_list_file: xenon_event_files.txt
+  
+  # Use terminals for make_se (Linux only)
+  use_terminals: false
+
+# ============================================================================
+# PLOTTING (advanced/plotting.py)
+# ============================================================================
+plotting:
+  # Default bin size (seconds)
+  bin_size: 1.0
+  
+  # Maximum bins for plotting
+  max_bins: 10000
+  
+  # Output format
+  format: png                 # png or eps
+  
+  # Multi-lightcurve plotting
+  multi_plot:
+    bin_size: -1              # -1 = auto
+    max_bins: 2000000
+  
+  # Workers for batch plotting
+  workers: auto
+
+# ============================================================================
+# SEPARATED GTI PROCESSING
+# ============================================================================
+separated_gti:
+  # Enable separated GTI processing
+  enabled: false
+  
+  # Output directory for split files
+  split_dir: fits_split
+  
+  # Prefix for separated event files
+  prefix: event
+
+# ============================================================================
+# POWER SPECTRUM VARIANTS
+# ============================================================================
+powspec_variants:
+  # High frequency analysis (for QPOs)
+  high_freq:
+    binning: -1
+    max_bins: 8192
+    nyquist_freq: 1000        # Hz
+    rebin: -1.03
+  
+  # Low frequency analysis
+  low_freq:
+    binning: 0.04
+    max_bins: 8192
+    rebin: -1.03
+  
+  # Small dataset
+  small:
+    binning: -1
+    max_bins: 4096
+    rebin: -1.0
+
+# ============================================================================
+# GLOBAL SETTINGS
+# ============================================================================
+global:
+  # Auto-detect CPU count for parallel workers
+  auto_workers: true
+  
+  # Number of workers (if not auto)
+  default_workers: 4
+  
+  # Logging level: DEBUG, INFO, WARNING, ERROR
+  log_level: INFO
+  
+  # Cleanup temporary files
+  cleanup_temp_files: true
+  
+  # Overwrite existing outputs
+  overwrite_outputs: false
+  
+  # Interactive mode by default
+  interactive_default: false
+
+# ============================================================================
+# EXPERT SETTINGS - CAUTION!
+# ============================================================================
+expert:
+  # seextrct advanced parameters
+  seextrct:
+    # Output columns
+    columns:
+      - TIME
+      - EVENT
+    
+    # Output products
+    products:
+      - LIGHTCURVE
+      - RATE
+      - SUM
+    
+    # INDEF parameters (usually don't change)
+    indef_count: 7
+  
+  # maketime advanced settings
+  maketime:
+    # Name column
+    name_col: NAME
+    
+    # Value column  
+    value_col: VALUE
+    
+    # Time column
+    time_col: TIME
+    
+    # Compact format
+    compact: no
+  
+  # pcaextlc1/2 advanced
+  lightcurve_extraction:
+    # Use systematic errors
+    use_sys_err: false
+    
+    # Additional parameters
+    std1_extra_params: []
+    std2_extra_params: []
+
+# ============================================================================
+# NOTES
+# ============================================================================
+# 1. Energy ranges in color_analysis are CHANNEL IDs (0-255), NOT keV
+# 2. Times are in seconds unless specified otherwise
+# 3. 'auto' for workers means use multiprocessing.cpu_count()
+# 4. Filter expressions should be tested before production use
+# 5. XSPEC model parameters can be [value], [value, min, max], or frozen with -1
+# 6. Consult RXTE documentation before changing expert settings
