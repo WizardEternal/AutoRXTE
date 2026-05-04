@@ -14,7 +14,7 @@ import gzip
 from pathlib import Path
 from typing import Optional
 import astropy.io.fits as fits
-from autorxte.utils import require_heasoft_tool
+from autorxte.utils import require_heasoft_tool, run_heasoft_pty, HEASoftToolError
 from autorxte.utils.interactive import get_path, get_input, get_yes_no
 
 logger = logging.getLogger(__name__)
@@ -141,31 +141,32 @@ def run_make_se(root_dir: Optional[Path] = None,
             logger.warning(f"No xenon_files.god in {results_dir.name}/Analysis")
             continue
         
-        script = analysis_dir / 'make_se_script.txt'
-        lines = [
-            "xenon_files.god",
-            output_root
-        ]
-        script.write_text("\n".join(lines) + "\n")
-        
+        script_text = f"xenon_files.god\n{output_root}\n"
+
         try:
             if use_terminals:
-                # Open in new terminal (Linux only)
+                # Open in new terminal (Linux only); for interactive debugging.
+                tmp = analysis_dir / 'make_se_script.txt'
+                tmp.write_text(script_text)
                 bash_cmd = f"cd '{analysis_dir}' && make_se < make_se_script.txt; exec bash"
                 subprocess.Popen(['gnome-terminal', '--', 'bash', '-c', bash_cmd])
-                logger.info(f"✓ Launched make_se in terminal for {results_dir.name}")
+                logger.info(f"OK   launched make_se in terminal for {results_dir.name}")
             else:
-                # Run in current process
-                with script.open('r') as sf:
-                    result = subprocess.run(['make_se'], stdin=sf, cwd=analysis_dir,
-                                          capture_output=True, text=True)
-                    if result.returncode == 0:
-                        logger.info(f"✓ {results_dir.name}")
-                    else:
-                        logger.error(f"✗ {results_dir.name}: {result.stderr}")
+                # Run via pty so make_se sees a real terminal.
+                try:
+                    run_heasoft_pty(
+                        ['make_se'],
+                        input_text=script_text,
+                        cwd=analysis_dir,
+                        timeout=1800,
+                    )
+                    logger.info(f"OK   {results_dir.name}")
+                except HEASoftToolError as e:
+                    logger.error(f"FAIL {results_dir.name}: {e}")
+                    continue
             count += 1
-        finally:
-            script.unlink(missing_ok=True)
+        except Exception as e:
+            logger.error(f"FAIL {results_dir.name}: {type(e).__name__}: {e}")
     
     if use_terminals:
         logger.info(f"Launched {count} make_se processes in terminals")

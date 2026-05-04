@@ -8,7 +8,9 @@ from autorxte.core.download_01 import (
 )
 from autorxte.core.preparation_02 import prepare_all_obsids
 from autorxte.core.organization_03 import organize_fits_files
-from autorxte.core.bitmasks_04 import copy_bitmask_to_results
+from autorxte.core.bitmasks_04 import (
+    copy_bitmask_to_results, list_available_bitmasks, print_bitmask_list,
+)
 from autorxte.core.filtering_05 import create_gti_filters
 from autorxte.core.extraction_06 import extract_all_events
 from autorxte.core.lightcurves_07 import generate_lightcurves

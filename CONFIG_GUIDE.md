@@ -1,591 +1,290 @@
-# AutoRXTE Configuration System - User Guide
+# Configuration
 
-## Overview
+Most parameters can be set in `autorxte_config.yaml`. Command-line flags
+on a subcommand always win over the config; the config wins over the
+hard-coded defaults.
 
-AutoRXTE uses a comprehensive YAML configuration system that lets you customize **every single parameter** without editing code. This includes:
+## Where the config is loaded from
 
-- Energy ranges (in CHANNEL IDs, NOT keV!)
-- Time bin sizes
-- Filter expressions
-- XSPEC models and parameters
-- Parallel workers
-- Output file names
-- And much more...
+In this order, first match wins:
 
-## Quick Start
+1. `./autorxte_config.yaml` (current working directory)
+2. `~/.autorxte/config.yaml`
+3. `autorxte/autorxte_config.yaml` (the package default that ships with
+   the install)
 
-### 1. Copy the Default Config
+To use a config from a non-standard location, pass `--config <path>`
+to the CLI or call `autorxte.config.load_config('<path>')` from Python.
 
-```bash
-# Copy default config to your working directory
-cp autorxte_config.yaml my_project_config.yaml
-```
+## Energy ranges are CHANNEL IDs, not keV
 
-### 2. Edit Parameters
+Almost every "energy" field in this config is a PCA channel ID (0-255),
+not a keV value. The exception is `xspec.energy_range` which is in keV
+(because XSPEC itself works in keV, after the response file has been
+applied). The other place keV appears is on the `xspec` and `pds`
+command-line flags (`--energy 3-30`, `--flux 3-30`).
 
 ```yaml
-# Example: Change color analysis ranges
+# Correct: PCA channel IDs (0-255)
 color_analysis:
   ranges:
-    soft: "0-10"      # Channels 0-10
-    medium: "11-30"   # Channels 11-30
-    hard: "31-255"    # Channels 31-255
+    soft:   "0-13"
+    medium: "14-35"
+    hard:   "36-255"
+
+# Wrong: this means channels 2-6, NOT 2-6 keV
+color_analysis:
+  ranges:
+    soft: "2-6"
 ```
 
-### 3. Use Your Config
+Approximate channel-to-energy mapping (varies with PCA gain epoch; check
+the gain files for precision):
 
-```python
-from autorxte.config import load_config
-from autorxte.core import *
+| Channels | Approx. keV |
+|---------:|:------------|
+|     0-13 | 2-6         |
+|    14-35 | 6-13        |
+|   36-255 | 13-60       |
 
-# Load your custom config
-load_config('my_project_config.yaml')
+## Sections
 
-# Now all functions use your config
-extract_color_ranges(interactive=False)  # Uses your ranges!
-```
+### `download`
 
-## Understanding Energy Ranges
-
-### ⚠️ CRITICAL: Channels vs keV
-
-**Energy ranges in AutoRXTE configs are CHANNEL IDs (0-255), NOT keV!**
-
-```yaml
-# ✅ CORRECT - Channel IDs
-ranges:
-  soft: "0-13"
-  medium: "14-35"
-  hard: "36-255"
-
-# ❌ WRONG - Don't use keV values!
-ranges:
-  soft: "2-6"     # This means channels 2-6, NOT 2-6 keV!
-```
-
-### Channel to Energy Conversion
-
-RXTE PCA channel-to-energy conversion varies by gain epoch, but approximate conversion:
-
-| Channels | Approximate Energy | Name |
-|----------|-------------------|------|
-| 0-13 | ~2-6 keV | Soft X-ray |
-| 14-35 | ~6-13 keV | Medium |
-| 36-255 | ~13-60 keV | Hard X-ray |
-
-**For precise conversion**, check RXTE gain files for your observation epoch.
-
-### Example Range Definitions
-
-```yaml
-# Standard black hole analysis
-ranges:
-  soft: "0-13"      # ~2-6 keV
-  medium: "14-35"   # ~6-13 keV
-  hard: "36-255"    # ~13-60 keV
-
-# High-energy focus
-ranges:
-  low: "0-20"       # ~2-7 keV
-  mid: "21-50"      # ~7-18 keV
-  high: "51-255"    # ~18-60 keV
-
-# Soft source focus
-ranges:
-  verysoft: "0-5"   # ~2-4 keV
-  soft: "6-15"      # ~4-7 keV
-  medium: "16-40"   # ~7-15 keV
-```
-
-## Config File Locations
-
-AutoRXTE searches for configs in this order:
-
-1. `./autorxte_config.yaml` (current directory) ← **Highest priority**
-2. `~/.autorxte/config.yaml` (user home)
-3. Package default config ← Lowest priority
-
-**Tip:** Place project-specific configs in your project directory!
-
-## Configuration Sections
-
-### Download Module
+S3 bucket selection and the archive-path template. `archive_prefix` is
+the most important key here: HEASARC has reorganised the bucket layout
+once before (from `rxte/data/archive/...` to `xte/data/archive/...`),
+so the template lives in config rather than in code. If a future move happens,
+update one line.
 
 ```yaml
 download:
-  workers: auto               # auto = CPU count
+  workers: auto                            # auto = CPU count
   search:
     catalog: xtemaster
     search_radius_arcmin: 5.0
+  s3:
+    bucket: nasa-heasarc
+    region: us-east-1
+    archive_prefix: "xte/data/archive/{cycle}/{prnb}/{obsid}/"
+  auto_detect_region: false
 ```
 
-### Preparation Module
+When a listing returns zero files, the download step prints a warning
+suggesting `aws s3 ls --no-sign-request s3://<bucket>/` for diagnosis.
+
+### `preparation`
 
 ```yaml
 preparation:
   workers: auto
-  skip_existing: true         # Don't reprocess existing results
+  skip_existing: true   # skip ObsIDs whose -results dir already has appid.lis
 ```
 
-### GTI Filtering (CRITICAL!)
+### `organization`
+
+```yaml
+organization:
+  move_mode: true       # move .god files into Analysis/, vs copy
+  overwrite: false
+```
+
+### `bitmasks`
+
+```yaml
+bitmasks:
+  e_token_bitmask: bitmask_event   # canonical name in Analysis/
+  xenon_bitmask:   bitmask_xenon
+  overwrite: false
+```
+
+The `bitmask` subcommand auto-discovers files under `bitmasks/` in the
+project root, the package directory, and `~/.autorxte/bitmasks/`. See
+[`bitmasks/README.md`](bitmasks/README.md) for the catalog.
+
+### `filtering`
+
+The default `maketime` selection expression is the standard PCA cuts.
+Override at the section level or with the `filter --filter '<expr>'` CLI
+flag.
 
 ```yaml
 filtering:
-  # Default filter - tested and reliable
   filter_expression: "(ELV > 4) && (OFFSET < 0.1) && (NUM_PCU_ON > 0) && .NOT. ISNULL(ELV) && (NUM_PCU_ON < 6)"
-  
-  # Stricter filter for clean data
-  # strict_filter: "(ELV > 10) && (OFFSET < 0.02) && (NUM_PCU_ON == 3)"
 ```
 
-**⚠️ WARNING:** Changing filter expressions affects your entire analysis! Test carefully!
+Stricter cuts for clean states:
 
-### Event Extraction
+```yaml
+filtering:
+  filter_expression: "(ELV > 10) && (OFFSET < 0.02) && (NUM_PCU_ON == 3)"
+```
+
+Test changes on one ObsID before running over a full dataset; bad cuts
+produce empty GTIs which propagate silently into all later steps.
+
+### `extraction`
 
 ```yaml
 extraction:
-  token: e                    # 'e' or 'xenon'
-  bitmask: bitmask_event
-  prefix: event
-  time_bin: 0.004            # Seconds - extraction binning
+  token: e                  # 'e' for event-mode, 'xenon' for Good Xenon
+  bitmask: bitmask_event    # filename inside Analysis/
+  prefix: event             # output is Analysis/<prefix>.lc
+  time_bin: 0.004           # seconds; 0.004 = 4 ms is the standard
   split_gti: false
   workers: auto
 ```
 
-**Time bin notes:**
-- `0.004` = 4 ms (standard)
-- `0.001` = 1 ms (fast timing)
-- `0.000125` = 125 μs (kHz QPOs)
+Common time-bin choices: `0.004` (4 ms, standard), `0.001` (1 ms, fast
+timing), `0.000125` (125 µs, kHz QPO searches).
 
-### Lightcurves
+### `lightcurves`
 
 ```yaml
 lightcurves:
-  type: std2                  # 'std1' or 'std2'
-  
+  type: std2
+
   std1:
     output_name: std1.lc
     pcu_selection: 2
-    bin_size_sec: 0.125      # 125 ms bins
-  
+    bin_size_sec: 0.125     # 125 ms
+
   std2:
     output_name: light.lc
     pcu_selection: 2
-    energy_channels: ALL      # Or specific range
-    time_bins: 16            # Number of bins
+    layerlist: ALL          # 1, 2, 3, or ALL
+    chmin: 0                # PCA channel range; required when layerlist=ALL
+    chmax: 255
+    time_bins: 16           # bin size in seconds, must be a multiple of 16
 ```
 
-### Spectra
+`chmin`/`chmax` are required for `pcaextlc2` when `layerlist=ALL`, or it
+hits an internal column-list overflow. The CLI sets sensible defaults
+(0 and 255).
+
+### `spectra`
 
 ```yaml
 spectra:
-  pcu_selection: 2            # PCU 2 most reliable
-  energy_channels: ALL
+  pcu_selection: 2
+  layerlist: ALL
   source_file: src.pha
-  background_file: bkg.pha    # Auto-generated!
-  response_file: rsp.pha      # Auto-generated!
+  background_file: bkg.pha   # auto-generated by pcaextspect2
+  response_file: rsp.pha     # auto-generated by pcaextspect2
 ```
 
-**Remember:** Background and response are generated automatically by pcaextspect2!
-
-### Power Spectra (PDS)
+### `pds`
 
 ```yaml
 pds:
   input_lightcurve: event.lc
-  binning: -1                 # -1 = auto
-  rebin: -1.03               # Geometric rebinning
+  binning: -1               # auto
+  rebin: -1.03              # geometric rebin factor (negative = geometric)
   max_bins: 8192
-  window: none
-  norm: -2                    # Leahy normalization
+  norm: -2                  # Leahy normalisation
+  plot_device: /null        # default; set to a file like pds.png/png to save
   workers: auto
 ```
 
-**Variants for different analyses:**
-
-```yaml
-powspec_variants:
-  # High-frequency QPO search
-  high_freq:
-    binning: -1
-    max_bins: 16384
-    nyquist_freq: 1000
-    rebin: -1.03
-  
-  # Low-frequency analysis
-  low_freq:
-    binning: 0.04
-    max_bins: 8192
-    rebin: -1.03
-```
-
-### Color-Color Analysis
+### `color_analysis`
 
 ```yaml
 color_analysis:
-  # THESE ARE CHANNEL IDs, NOT keV!
+  # CHANNELS, not keV
   ranges:
-    soft: "0-13"
+    soft:   "0-13"
     medium: "14-35"
-    hard: "36-255"
-  
-  color_names:
-    - soft
-    - medium
-    - hard
-  
-  time_bin: 0.04              # Extraction binning
-  lcurve_bin_size: -1         # Plotting binning (-1 = auto)
+    hard:   "36-255"
+  color_names: [soft, medium, hard]
+  time_bin: 0.04
   workers: auto
 ```
 
-### XSPEC Fitting
+### `xspec`
 
 ```yaml
 xspec:
-  default_model: diskbb_pexrav
-  
+  # Default keV range applied as `ignore **-emin emax-**`
   energy_range:
-    min: 3.0                  # keV (this IS in keV!)
-    max: 30.0                 # keV
-  
-  models:
-    diskbb_pexrav:
-      expression: "tbabs(diskbb + pexrav)"
-      params:
-        nH: [5.5, 2.0, 10.0]           # [value, min, max]
-        diskbb_kT: [1.2, 1.0, 4.0]
-        diskbb_norm: 400                # Single value = frozen
-        pexrav_PhoIndex: [2.0, 1.3, 4.0]
-        # ... more params
-  
-  max_iterations: 1000
-  save_plots: true
+    min: 3.0
+    max: 30.0
 ```
 
-**Model parameter formats:**
-- `value` - Frozen parameter
-- `[value, min, max]` - Free parameter with bounds
-- Set to `-1` to freeze at current value
+The XSPEC subcommand is template-driven: you supply a `.xcm` (from
+`save all` in an interactive XSPEC session), it gets distributed across
+every `Analysis/`. There is no `xspec.models` dictionary here; the model
+*is* the template. See the README's `xspec` section for the full
+operation list.
 
-### Xenon Mode
+### `xenon`
 
 ```yaml
 xenon:
-  fits_extension: XTE_SP
-  output_root: event
+  fits_extension: XTE_SP    # which extension the Xenon files have
+  output_root: event        # make_se output prefix
   event_pattern: xenon_event_gx*
-  use_terminals: false        # Linux terminal mode
+  use_terminals: false      # true = launch make_se in gnome-terminal (Linux)
 ```
 
-### Plotting
+### `plotting`
 
 ```yaml
 plotting:
-  bin_size: 1.0              # Seconds
+  bin_size: 1.0
   max_bins: 10000
-  format: png                # or 'eps'
+  plot_device: /null
   workers: auto
 ```
 
-## Using Config in Code
-
-### Method 1: Use Config Defaults
+## Using the config from Python
 
 ```python
-from autorxte.core import *
+from autorxte.config import load_config, get_config
+from autorxte.core import generate_lightcurves
 
-# All functions use config defaults
-extract_all_events(interactive=False)
-generate_lightcurves(interactive=False)
-```
-
-### Method 2: Load Custom Config
-
-```python
-from autorxte.config import load_config
-from autorxte.core import *
-
-# Load your custom config
-load_config('my_analysis_config.yaml')
-
-# Now uses your custom parameters
-extract_all_events(interactive=False)
-```
-
-### Method 3: Override Config with Parameters
-
-```python
-from autorxte.core import *
-
-# Parameters override config
-extract_all_events(
-    time_bin=0.001,          # Override config time_bin
-    workers=8,               # Override config workers
-    interactive=False
-)
-```
-
-### Method 4: Access Config Directly
-
-```python
-from autorxte.config import get_config
-
-config = get_config()
-
-# Get specific values
-time_bin = config.get('extraction.time_bin', 0.004)
-filter_expr = config.get_filter_expression()
-
-# Get entire sections
-pds_config = config.get_section('pds')
-
-# Get color ranges
-ranges, names = config.get_color_ranges()
-```
-
-## Example Workflows
-
-### Workflow 1: High-Energy Analysis
-
-```python
-from autorxte.config import load_config
-from autorxte.core import *
-from autorxte.advanced import *
-
-# Load high-energy config
-load_config('config_high_energy.yaml')
-
-# Run analysis - all uses high-energy parameters
-search_and_download("Cyg X-1", top_n=10)
-prepare_all_obsids()
-extract_all_events()          # Uses time_bin=0.001 from config
-generate_lightcurves()
-extract_spectra()
-fit_all_spectra()             # Uses powerlaw model from config
-extract_color_ranges()        # Uses high-energy channel ranges
-```
-
-### Workflow 2: QPO Search
-
-```python
-load_config('config_qpo_analysis.yaml')
-
-# Fine time resolution for QPOs
-extract_all_events()          # Uses time_bin=0.000125
-compute_pds()                 # Uses max_bins=16384
-```
-
-### Workflow 3: Mixed Parameters
-
-```python
+# Load a custom config
 load_config('my_config.yaml')
 
-# Some from config, some override
-extract_all_events(
-    token='xenon',            # Override
-    time_bin=0.01,           # Override
-    # workers, bitmask, etc from config
-    interactive=False
-)
+# Now Python calls pick up the config defaults
+generate_lightcurves(interactive=False)
+
+# Or read a specific value
+config = get_config()
+time_bin = config.get('extraction.time_bin', 0.004)
 ```
 
-## Example Configs Provided
-
-We provide several example configs for common analyses:
-
-1. **config_high_energy.yaml** - Hard X-ray focus
-2. **config_soft_thermal.yaml** - Thermal/soft state
-3. **config_qpo_analysis.yaml** - QPO detection
-
-Copy and modify these for your needs!
-
-## Best Practices
-
-### 1. One Config Per Project
-
-```
-my_project/
-├── data/
-├── autorxte_config.yaml    # Project-specific config
-└── analysis.py
-```
-
-### 2. Document Your Changes
-
-```yaml
-# Custom config for GX 339-4 outburst analysis
-# Modified: 2025-01-15
-# Changes: Increased time resolution for QPO search
-
-extraction:
-  time_bin: 0.000125  # 125 μs for kHz QPOs
-```
-
-### 3. Version Control Your Configs
-
-```bash
-git add autorxte_config.yaml
-git commit -m "Add QPO analysis config"
-```
-
-### 4. Test Filter Changes
+Function arguments still override config values:
 
 ```python
-# Test new filter on one observation first
-create_gti_filters(
-    filter_expression="(ELV > 10) && (OFFSET < 0.02)",
-    interactive=False
+generate_lightcurves(
+    workers=8,                # overrides config / CLI default
+    interactive=False,
 )
-# Check outputs before running on all data
 ```
 
-## Common Customizations
+## Example configs
 
-### Change Time Resolution
+`examples/config_*.yaml` ships pre-written configs for common analyses:
 
-```yaml
-# Standard timing
-extraction:
-  time_bin: 0.004    # 4 ms
+- `config_qpo_analysis.yaml` - 125 µs time resolution, large `max_bins`
+- `config_high_energy.yaml` - higher channel ranges
+- `config_soft_thermal.yaml` - softer state focus
 
-# Fast timing
-extraction:
-  time_bin: 0.001    # 1 ms
-
-# Ultra-fast (kHz QPOs)
-extraction:
-  time_bin: 0.000125 # 125 μs
-```
-
-### Adjust Energy Ranges
-
-```yaml
-# Remember: CHANNELS not keV!
-
-# For harder source
-color_analysis:
-  ranges:
-    low: "0-25"
-    mid: "26-60"
-    high: "61-255"
-
-# For softer source  
-color_analysis:
-  ranges:
-    verysoft: "0-8"
-    soft: "9-20"
-    medium: "21-50"
-```
-
-### Change XSPEC Model
-
-```yaml
-xspec:
-  default_model: powerlaw_only  # For hard state
-  
-  # Or custom model
-  models:
-    my_model:
-      expression: "tbabs*(diskbb + nthcomp)"
-      params:
-        nH: 5.5
-        # ...
-```
-
-### Adjust PDS Settings
-
-```yaml
-# For low-frequency QPOs
-pds:
-  binning: 0.1       # Longer bins
-  max_bins: 4096
-  rebin: -1.05
-
-# For high-frequency QPOs
-pds:
-  binning: -1
-  max_bins: 16384
-  rebin: -1.01
-```
+Copy one into your project as `autorxte_config.yaml` and edit.
 
 ## Troubleshooting
 
-### Config Not Loading
+**No config seems to be loading.** Run `python -c "from autorxte.config
+import get_config; c = get_config(); print(c._config)"` to see what was
+actually loaded. Check that the file is named exactly
+`autorxte_config.yaml` and is in cwd or `~/.autorxte/`.
 
-```python
-# Check which config is being used
-from autorxte.config import get_config
+**Empty output / no events extracted.** Check that the channel ranges in
+your config are 0-255 channel IDs and not keV values. `soft: "2-6"`
+means "channels 2 through 6", which is below where the PCA actually has
+counts.
 
-config = get_config()
-print("Config loaded successfully")
-
-# Try explicit load
-load_config('/full/path/to/config.yaml')
-```
-
-### Wrong Energy Ranges
-
-```
-ERROR: No events extracted
-
-# Check: Are you using channels (0-255) not keV?
-# ❌ ranges: soft: "2-6"   (Too low - no channels!)
-# ✅ ranges: soft: "0-13"  (Correct channels)
-```
-
-### Module Not Using Config
-
-```python
-# Make sure to use interactive=False
-extract_all_events(interactive=False)  # ✅ Uses config
-
-# Not this
-extract_all_events(interactive=True)   # ❌ Prompts user
-```
-
-## Advanced: Creating Custom Variants
-
-```yaml
-# Define multiple PDS variants
-powspec_variants:
-  qpo_low:
-    binning: 0.1
-    max_bins: 4096
-    rebin: -1.05
-  
-  qpo_mid:
-    binning: 0.01
-    max_bins: 8192
-    rebin: -1.03
-  
-  qpo_high:
-    binning: -1
-    max_bins: 16384
-    rebin: -1.01
-```
-
-```python
-# Use variants in code
-config = get_config()
-
-# Run all three variants
-for variant_name in ['qpo_low', 'qpo_mid', 'qpo_high']:
-    variant = config.get_section(f'powspec_variants.{variant_name}')
-    compute_pds(
-        binning=variant['binning'],
-        max_bins=variant['max_bins'],
-        rebin=variant['rebin'],
-        interactive=False
-    )
-```
-
-## Summary
-
-✅ **All parameters are configurable**
-✅ **Energy ranges are CHANNEL IDs (0-255)**
-✅ **Config overrides defaults**
-✅ **Parameters override config**
-✅ **One config per project recommended**
-
-See `autorxte_config.yaml` for complete parameter list!
+**A subcommand ignores the config.** Function arguments and CLI flags
+take precedence. If you set `extraction.time_bin: 0.001` in the config
+and pass `--time-bin 0.004` on the CLI, the CLI wins. Both win over the
+hard-coded default.

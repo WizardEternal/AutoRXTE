@@ -1,50 +1,27 @@
 # AutoRXTE
 
-Automated pipeline for RXTE X-ray data analysis from download to advanced spectral-timing products.
+Batch processing for RXTE/PCA observations: download from the HEASARC S3
+mirror, run the standard `pcaprep* / seextrct / maketime / pcaextlc* /
+pcaextspect2 / powspec` chain, and apply your XSPEC fits across many
+ObsIDs. Each stage is its own subcommand and runs unattended on a fresh
+download with no manual XSPEC sessions until you actually want to fit.
+
+For a fully programmatic XSPEC fitting API (parameter manipulation,
+steppar, MCMC, contour grids), use
+[pyxspec](https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html)
+or [Sherpa](https://cxc.cfa.harvard.edu/sherpa/). The `xspec` subcommand
+here is template-driven: you craft one `.xcm` interactively, AutoRXTE
+distributes it across many ObsIDs and aggregates results.
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Overview
+## Requirements
 
-AutoRXTE is a comprehensive Python toolkit designed to automate the complete RXTE (Rossi X-ray Timing Explorer) data analysis workflow. The package provides both programmatic and interactive interfaces for researchers to efficiently process RXTE observations, from raw data acquisition through advanced spectral-timing analysis.
-
-### Key Features
-
-**Complete Analysis Pipeline**
-- Automated data acquisition from NASA HEASARC archives
-- Parallel processing with configurable worker pools
-- Comprehensive error handling and progress tracking
-- Resume capability for interrupted downloads
-
-**Core Analysis Modules**
-- Data preparation and organization
-- GTI (Good Time Interval) filtering
-- Event extraction for E-token and Xenon modes
-- Standard and custom lightcurve generation
-- Spectral extraction with automatic background and response
-- Power density spectrum (PDS) analysis
-
-**Advanced Capabilities**
-- Multi-energy color-color diagram generation
-- Automated XSPEC spectral model fitting
-- Complete Xenon mode preprocessing workflow
-- Batch lightcurve visualization
-
-**Flexible Configuration**
-- YAML-based parameter customization
-- Region-specific download optimization
-- Pre-configured templates for common analyses (QPO detection, hard/soft states)
-
-## Installation
-
-### Requirements
-
-- Python ≥ 3.8
-- HEASoft (with FTOOLS, XSPEC, and XRONOS)
-- Required Python packages: astropy, astroquery, boto3, numpy, pyyaml
-
-### From Source
+- Python 3.8 or later
+- HEASoft initialised in the shell (`source $HEADAS/headas-init.sh`).
+  Tested with HEASoft 6.33.
+- Python packages: `astropy`, `astroquery`, `boto3`, `numpy`, `pyyaml`.
 
 ```bash
 git clone https://github.com/WizardEternal/AutoRXTE.git
@@ -52,234 +29,361 @@ cd AutoRXTE
 pip install -r requirements.txt
 ```
 
-**Note:** Package is not yet available on PyPI. Installation from pip will be supported in a future release.
+`pip install -e .` installs the `autorxte` console script. Otherwise run
+the modules with `python -m autorxte.cli.main <command>`.
 
-### HEASoft Installation
+## Pipeline
 
-AutoRXTE requires HEASoft to be installed and initialized:
+The core pipeline is a linear chain. Each step writes outputs that the
+next step reads, all under `<obsid>-results/Analysis/`.
 
-```bash
-# Initialize HEASoft (required before using AutoRXTE)
-source $HEADAS/headas-init.sh
+| Step          | Output                          | Tool                    |
+|---------------|---------------------------------|-------------------------|
+| download      | `<obsid>/`                      | (S3 archive)            |
+| prepare       | `<obsid>-results/`              | pcaprepobsid            |
+| organize      | `Analysis/fits_files.god`       | FITS scan + path list   |
+| bitmask       | `Analysis/bitmask_event`        | (file copy)             |
+| filter        | `Analysis/good.gti`             | maketime                |
+| extract       | `Analysis/event.lc`             | seextrct (full band)    |
+| lightcurves   | `Analysis/std1.lc, light.lc`    | pcaextlc1, pcaextlc2    |
+| spectra       | `Analysis/{src,bkg,rsp}.pha`    | pcaextspect2            |
+| pds           | `Analysis/pds-{src,rsp}.pha`    | powspec + fplot + flx2xsp |
 
-# Add to ~/.bashrc for automatic initialization
-echo "source $HEADAS/headas-init.sh" >> ~/.bashrc
-```
+Advanced steps (`color-extract`, `color-plot`, `xspec`, `xenon`, `plot`)
+read the same `Analysis/` outputs.
 
-Download HEASoft from: https://heasarc.gsfc.nasa.gov/lheasoft/
+## End-to-end example
 
-## Quick Start
-
-### Basic Workflow
-
-```python
-from autorxte.core import (
-    search_and_download, prepare_all_obsids, extract_all_events,
-    generate_lightcurves, extract_spectra, compute_pds
-)
-from pathlib import Path
-
-# Download observations
-search_and_download(
-    source="Cygnus X-1",
-    top_n=10,
-    output_dir=Path("./data"),
-    interactive=False
-)
-
-# Process observations
-prepare_all_obsids(root_dir=Path("./data"))
-extract_all_events(root_dir=Path("./data"))
-generate_lightcurves(root_dir=Path("./data"))
-extract_spectra(root_dir=Path("./data"))
-compute_pds(root_dir=Path("./data"))
-```
-
-### Advanced Analysis
-
-```python
-from autorxte.advanced import (
-    extract_color_ranges, plot_color_diagrams,
-    fit_all_spectra, xenon_complete_workflow
-)
-
-# Color-color diagram analysis
-extract_color_ranges(
-    ranges=['0-13', '14-35', '36-255'],  # Channel IDs, not keV
-    names=['soft', 'medium', 'hard']
-)
-plot_color_diagrams()
-
-# Automated XSPEC fitting
-fit_all_spectra(model='tbabs(diskbb + pexrav)')
-```
-
-### Configuration-Based Workflow
-
-```python
-from autorxte.config import load_config
-
-# Load custom configuration
-load_config('qpo_analysis.yaml')
-
-# All parameters now use config values
-extract_all_events()  # Uses time_bin from config
-compute_pds()         # Uses max_bins from config
-```
-
-## Command Line Interface
+A full run from search to XSPEC fit on the smallest GRS 1915+105 ObsID:
 
 ```bash
-# Download with automatic region optimization
-autorxte download --source "Cyg X-1" --top-n 10 --auto-detect-region
+WORK=./data
 
-# Process pipeline
-autorxte prepare --directory ./data
-autorxte extract --directory ./data
-autorxte lightcurves --directory ./data --type std2
-autorxte spectra --directory ./data
-autorxte pds --directory ./data
+autorxte download --source "GRS 1915+105" --bottom-n 1 \
+                  --directory $WORK --no-interactive
+DL=$WORK/download_RXTE_GRS1915+105
 
-# Advanced features
-autorxte color-extract --directory ./data
-autorxte xspec --directory ./data --model diskbb_pexrav
+autorxte prepare      --directory $DL --no-interactive
+autorxte organize     --directory $DL --no-interactive
+autorxte bitmask      --directory $DL --no-interactive
+autorxte filter       --directory $DL --no-interactive
+autorxte extract      --directory $DL --no-interactive
+autorxte lightcurves  --directory $DL --type std2 --no-interactive
+autorxte lightcurves  --directory $DL --type std1 --no-interactive
+autorxte spectra      --directory $DL --no-interactive
+autorxte pds          --directory $DL --no-interactive
+autorxte color-extract --directory $DL --no-interactive
 ```
 
-## Interactive Menu
+On a small ObsID (~18 MB), the full chain runs in roughly 35 seconds
+end-to-end (most of that is the download).
 
-For interactive analysis with a terminal menu interface:
+## Subcommands
+
+Every subcommand supports `--no-interactive` and exposes its parameters
+as flags. Without `--no-interactive`, missing arguments are prompted for
+with sensible defaults shown in `[brackets]`.
+
+### download
+
+Downloads from `s3://nasa-heasarc/xte/data/archive/AOn/Pnnnnn/<obsid>/`
+in parallel via boto3. Resume is automatic via a per-source
+`downloaded_RXTE_<source>.json` ledger.
 
 ```bash
-python autorxte_interactive.py
+autorxte download --source "GRS 1915+105" --top-n 5 --directory ./data
+autorxte download --source "Cyg X-1" --obsids 10408-01-01-00,10408-01-01-01
+autorxte download --source "GX 339-4" --bottom-n 1 --auto-detect-region
 ```
 
-## Global Download Optimization
+Notable flags: `--top-n / --bottom-n / --obsids` to pick observations,
+`--min-exposure / --start-date / --end-date` to filter,
+`--region / --auto-detect-region` for AWS region selection,
+`--bucket` to override the S3 bucket.
 
-AutoRXTE implements intelligent region selection for optimal download speeds worldwide:
+The archive prefix is configurable via `download.s3.archive_prefix` in
+`autorxte_config.yaml`. HEASARC has reorganised the layout once before
+(`rxte/` to `xte/`); when listings come back empty the tool prints the
+exact `aws s3 ls --no-sign-request s3://<bucket>/` command to inspect.
 
-**Automatic Region Detection**
-```python
-# First run: Auto-detects fastest AWS region
-search_and_download("GX 339-4", top_n=5)
+### prepare
 
-# Preference saved to ~/.autorxte/download_region.json
-# Subsequent runs use saved preference automatically
-```
-
-**Expected Performance by Region**
-| Region | Optimal AWS Endpoint |
-|--------|---------------------|
-| North America | us-east-1, us-west-2 |
-| Europe | eu-west-1 |
-| India | ap-south-1 (Mumbai) |
-| Southeast Asia | ap-southeast-1 (Singapore) |
-| East Asia | ap-northeast-1 (Tokyo) |
-
-**Manual Configuration**
-```yaml
-# autorxte_config.yaml
-download:
-  s3:
-    region: ap-south-1  # Override for your location
-```
-
-## Configuration System
-
-AutoRXTE uses YAML-based configuration for all analysis parameters.
-
-**Critical Note on Energy Ranges:** All energy ranges in configuration files use **PCA channel IDs (0-255)**, not keV values.
-
-```yaml
-# Correct: Channel IDs
-color_analysis:
-  ranges:
-    soft: "0-13"      # Channels 0-13 ≈ 2-6 keV
-    medium: "14-35"   # Channels 14-35 ≈ 6-13 keV
-    hard: "36-255"    # Channels 36-255 ≈ 13-60 keV
-
-# Incorrect: Do not use keV values
-# ranges:
-#   soft: "2-6"  # This means channels 2-6, NOT 2-6 keV!
-```
-
-**Channel to Energy Conversion** (approximate, varies by gain epoch):
-- Channels 0-13: ~2-6 keV (soft X-rays)
-- Channels 14-35: ~6-13 keV (medium)
-- Channels 36-255: ~13-60 keV (hard X-rays)
-
-See `CONFIG_GUIDE.md` for complete parameter reference.
-
-## Example Configurations
-
-Template configurations for common analyses:
+Runs `pcaprepobsid` on each ObsID directory. Creates `<obsid>-results/`
+with the standard `FP_*.lis` lists and `appid.lis` sentinel.
 
 ```bash
-examples/
-├── config_qpo_analysis.yaml      # QPO detection (125 μs time resolution)
-├── config_high_energy.yaml       # Hard X-ray analysis
-└── config_soft_thermal.yaml      # Soft/thermal state analysis
+autorxte prepare --directory ./data/download_RXTE_GRS1915+105 --workers 4
 ```
 
-## Module Architecture
+`--no-skip-existing` re-prepares ObsIDs whose `-results/` already has
+the sentinel.
 
-**Core Modules** (01-09)
-1. Download - S3 data acquisition with region optimization
-2. Preparation - pcaprepobsid execution
-3. Organization - FITS file cataloging
-4. Bitmasks - Automated distribution
-5. Filtering - GTI creation with maketime
-6. Extraction - Event extraction via seextrct
-7. Lightcurves - STD1/STD2 generation
-8. Spectra - Source, background, and response extraction
-9. PDS - Power density spectrum computation
+### organize
 
-**Advanced Modules** (01-04)
-1. Color-Color Analysis - Multi-energy lightcurve extraction and visualization
-2. XSPEC Fitting - Automated spectral model fitting with predefined models
-3. Xenon Mode - Complete Good Xenon preprocessing pipeline
-4. Plotting - Batch lightcurve visualization utilities
+Scans every ObsID's `pca/` for FITS files, reads the `DATAMODE` and
+`DDESC` headers from the `XTE_SE` (event-mode) and `XTE_SP` (Good Xenon)
+extensions, and writes path lists into `Analysis/`:
 
-## Documentation
+- `fits_data_summary.csv`, `fits_files.god` for event-mode files
+- `xenon_data_summary.csv`, `xenon_files.god` for Xenon-mode files
 
-- **README.md** - This file
-- **CONFIG_GUIDE.md** - Comprehensive parameter reference
-- **CONFIG_QUICK_REF.md** - Quick reference card
-- **DUAL_MODE_GUIDE.md** - Interactive vs programmatic usage
-- **examples/** - Complete workflow examples
+`fits_files.god` is the input to `seextrct` in the `extract` step. If
+this step is skipped, downstream extraction has nothing to read.
 
-## Citation
+### bitmask
 
-If you use AutoRXTE in your research, please cite:
+Copies a `seextrct` bitmask file into every `<obsid>-results/Analysis/`,
+renamed to `bitmask_event` (the canonical filename downstream tools
+expect).
 
-```bibtex
-@software{autorxte2025,
-  author = {{AutoRXTE Development Team}},
-  title = {AutoRXTE: Automated RXTE Data Analysis Pipeline},
-  year = {2025},
-  url = {https://github.com/WizardEternal/AutoRXTE}
-}
+```bash
+autorxte bitmask --list                                  # show available
+autorxte bitmask --bitmask bitfile_gx_d012 --directory ./data
+autorxte bitmask --bitmask /custom/path/mybitmask.txt --directory ./data
 ```
 
-## Contributing
+The repo ships the full HEASARC PCA bitmask catalog (35 files: D-token,
+Good Xenon, Z-token modes) under `bitmasks/`. See
+[`bitmasks/README.md`](bitmasks/README.md) for the index and a guide to
+which to use for which `DATAMODE`.
 
-Contributions are welcome. Please open an issue or submit a pull request on GitHub.
+### filter
+
+Runs `maketime` to build `Analysis/good.gti` from the prep-stage filter
+file. Default selection expression is the typical RXTE PCA cuts:
+
+```
+(ELV > 4) && (OFFSET < 0.1) && (NUM_PCU_ON > 0)
+&& .NOT. ISNULL(ELV) && (NUM_PCU_ON < 6)
+```
+
+Override with `--filter '<expr>'`.
+
+### extract
+
+Runs `seextrct` against `Analysis/fits_files.god` and `Analysis/good.gti`
+to produce `Analysis/event.lc`, the full-band lightcurve. `--token xenon`
+switches to `Analysis/xenon_event_files.txt` (built by the `xenon`
+subcommand).
+
+### lightcurves
+
+`pcaextlc1` for STD1 single-channel, `pcaextlc2` for STD2 multi-channel.
+
+```bash
+autorxte lightcurves --type std2 --directory ./data
+autorxte lightcurves --type std1 --bin-size 0.125 --directory ./data
+```
+
+`pcaextlc1/2` has a fixed-size internal buffer for the temp filename it
+allocates next to your output. Long output paths overflow it and the
+tool aborts with the unhelpful "COLUMNS parameter may be too long" error.
+AutoRXTE works around this by running the tool in a short tempdir and
+moving the lightcurve into `Analysis/` afterwards. See the comment in
+`autorxte/core/lightcurves_07.py` if you need to dig into it.
+
+### spectra
+
+`pcaextspect2` produces `src.pha`, `bkg.pha`, and `rsp.pha` together.
+Same path-length workaround as lightcurves.
+
+### pds
+
+Runs `powspec`, then `fplot`, then `flx2xsp` to produce `pds-src.pha`
+and `pds-rsp.pha`, an XSPEC-readable spectrum representation of the
+power spectrum suitable for fitting QPO models.
+
+The default plot device is `/null` so this works on headless boxes
+without `DISPLAY`. Pass `--plot-device pds.png/png` to also save a PGPLOT
+PNG of the spectrum.
+
+### color-extract
+
+Runs `seextrct` once per energy band to make per-band lightcurves
+(`soft.lc`, `medium.lc`, `hard.lc` by default).
+
+```bash
+autorxte color-extract --directory ./data \
+                       --ranges 0-13 14-35 36-255 \
+                       --names soft medium hard
+```
+
+Energy ranges here are PCA channel IDs, **not keV**. See
+[`bitmasks/README.md`](bitmasks/README.md) for the conversion.
+
+### xspec
+
+Template-driven XSPEC runner. You craft one `.xcm` interactively (`xspec`,
+fit, `save all best.xcm`), then this distributes it across every
+`<obsid>-results/Analysis/` and runs the operations you ask for.
+
+```bash
+autorxte xspec --xcm best.xcm --directory ./data \
+               --energy 3-30 \
+               --error 1,2,3,4,5 \
+               --flux 3-30 \
+               --output fit_results.csv
+```
+
+What it does for each ObsID:
+
+1. Copies the template into `Analysis/<name>.xcm`. By default rewrites
+   the `data`, `response`, `backgrnd`, `arf`, and `corfile` lines so each
+   instance points at that ObsID's spectra (basename preserved). Pass
+   `--no-rewrite` to use the template verbatim with `cwd=Analysis/`.
+2. Builds the XSPEC stdin script:
+   `@<name>.xcm; [ignore]; freeze/thaw; gain fit; fit N; error i,j,...;
+    flux Emin Emax; save all <name>_bestfit.xcm; exit`.
+3. Runs `xspec`, captures the log, and verifies `<name>_bestfit.xcm`
+   exists (catches XSPEC's silent-failure mode).
+4. Parses the log for χ², dof, reduced χ², per-parameter values and
+   quoted errors, the `error` command's confidence ranges
+   (lo, hi, Δ−, Δ+), and integrated flux (photons and ergs).
+
+All ObsIDs aggregate into one CSV at `--output`.
+
+What this is not: a wrapper for steppar, contour grids, MCMC, F-tests,
+add-component / del-component, multi-dataset joint loads, or programmatic
+parameter manipulation between fit phases. Those want pyxspec or Sherpa.
+
+### xenon
+
+Good-Xenon preprocessing: `make_se` + the `xenon_event_files.txt`
+generation that lets `extract --token xenon` work. Requires Xenon-mode
+data (`XTE_SP` extension) in `pca/`.
+
+### plot
+
+Wrapper around `lcurve` for batch lightcurve plotting. Default device is
+`/null` (headless). PGPLOT's hardcopy-to-PNG behaviour through `lcurve`
+stdin scripts is finicky and version-dependent; the data files are the
+primary product, the plot is best-effort.
+
+## Configuration
+
+Most of the runtime parameters can also be set in `autorxte_config.yaml`
+in any of these locations (first match wins):
+
+1. `./autorxte_config.yaml` (current working directory)
+2. `~/.autorxte/config.yaml`
+3. The package default
+
+See [`CONFIG_GUIDE.md`](CONFIG_GUIDE.md) for the full key reference.
+Most flags on the command line accept the same values; explicit flags
+override the config.
+
+## How HEASoft tools are run
+
+HEASoft's parameter-driven FTOOLS (`pcaprepobsid`, `seextrct`,
+`maketime`, `lcurve`, `xspec`, etc.) open `/dev/tty` for prompts even
+when every parameter is supplied on the command line. Under a non-tty
+stdin, they typically fail with `Unable to redirect prompts to the
+/dev/tty` and exit with OS code **0**, leaving no output and no error
+visible to the caller.
+
+AutoRXTE runs all of them through a small pty wrapper
+(`autorxte/utils/subprocess_utils.py:run_heasoft_pty`) that:
+
+1. Allocates a pseudo-terminal and makes the slave the controlling tty
+   in the child via `setsid + TIOCSCTTY`.
+2. Captures combined stdout/stderr.
+3. Parses the HEASoft `Task <name> ... terminating with status N` line
+   and raises if N is non-zero (catching the OS-exit-0 silent-failure
+   mode).
+4. Verifies a list of expected output files actually exist after the
+   call returns.
+5. Enforces a per-call timeout.
+
+If you are wrapping a new HEASoft tool, use this helper instead of
+calling `subprocess.run` directly.
+
+## Resume / skip semantics
+
+Every subcommand checks for its own primary output before starting and
+skips ObsIDs that already have it. `--no-skip-existing` overrides.
+
+What each step looks for:
+
+| step          | sentinel that triggers SKIP                |
+|---------------|--------------------------------------------|
+| download      | per-file paths in `downloaded_*.json`      |
+| prepare       | `<obsid>-results/appid.lis`                |
+| organize      | `Analysis/fits_files.god`                  |
+| bitmask       | `Analysis/bitmask_event`                   |
+| filter        | `Analysis/good.gti` (non-empty)            |
+| extract       | `Analysis/<prefix>.lc` (non-empty)         |
+| lightcurves   | `Analysis/<lc-name>` (non-empty)           |
+| spectra       | `Analysis/<src-name>` (non-empty)          |
+| pds           | `Analysis/pds-src.pha` (non-empty)         |
+| color-extract | `Analysis/<color>.lc` per band (non-empty) |
+| xspec         | `Analysis/<name>_bestfit.xcm` (non-empty)  |
+
+This means the safe way to retry a flaky run is to just re-invoke the
+same command. No manual cleanup needed.
+
+## Logging
+
+All modules log via `logging.getLogger(__name__)`. The CLI configures it
+to `INFO` by default, `--verbose` for `DEBUG`, `--quiet` for
+`WARNING`-and-up.
+
+```bash
+autorxte --verbose extract --directory ./data
+autorxte --quiet pds --directory ./data
+```
+
+`--verbose` also makes the CLI print full Python tracebacks on error
+instead of the one-line `error: <type>: <msg>` summary.
+
+## Known issues
+
+- `lcurve` plot output. PGPLOT's hardcopy-to-PNG inside an `lcurve`
+  stdin script depends on the PGPLOT build and sometimes does not
+  produce the file even when the device is set. The `.lc` data is fine;
+  the PNG is not always.
+- The `gnome-terminal` mode in `xenon` (used historically for
+  side-by-side `make_se` runs) only works on systems with that terminal
+  emulator installed. The default path runs `make_se` in-process via the
+  pty wrapper.
+- `pcaextlc1/pcaextlc2` and `pcaextspect2` cannot tolerate long output
+  paths. The wrappers run them in a short tempdir and move outputs
+  afterwards. If you bypass the wrappers, expect "COLUMNS parameter may
+  be too long" errors and use shorter paths.
+
+## Module layout
+
+```
+autorxte/
+├── core/
+│   ├── download_01.py        S3 download + resume
+│   ├── preparation_02.py     pcaprepobsid
+│   ├── organization_03.py    FITS scan + .god generation
+│   ├── bitmasks_04.py        bitmask distribution + auto-discover
+│   ├── filtering_05.py       maketime
+│   ├── extraction_06.py      seextrct (+ split_gti helper)
+│   ├── lightcurves_07.py     pcaextlc1, pcaextlc2
+│   ├── spectra_08.py         pcaextspect2
+│   └── pds_09.py             powspec + fplot + flx2xsp
+├── advanced/
+│   ├── color_color_01.py     per-band seextrct + lcurve
+│   ├── xspec_fit_02.py       template .xcm runner
+│   ├── xenon_mode_03.py      Good-Xenon make_se chain
+│   └── plotting_04.py        batch lcurve
+├── utils/
+│   ├── subprocess_utils.py   run_heasoft_pty + HEASoftToolError
+│   ├── interactive.py        get_input/get_path/get_choice helpers
+│   └── fits_utils.py         GTI splitting
+├── cli/
+│   └── main.py               argparse dispatcher
+├── config.py                 YAML loader (singleton)
+└── autorxte_config.yaml      default config (in package)
+```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT. See [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- NASA HEASARC for RXTE data archival and access
-- HEASoft development team
-- RXTE mission team and data providers
-
-## Version
-
-**v1.1.0** - Complete workflow with advanced features and global optimization
-
----
-
-**Repository:** https://github.com/WizardEternal/AutoRXTE
-
-**Issues & Support:** https://github.com/WizardEternal/AutoRXTE/issues
+NASA HEASARC for hosting the RXTE archive on the public S3 mirror, and
+the HEASoft team for the FTOOLS this is built around.

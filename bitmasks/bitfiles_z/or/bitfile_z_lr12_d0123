@@ -1,0 +1,8 @@
+ Event == b1xxxxxxxxxxxxxxx && 
+ (Event <= bxxxxxxxx00011xxx || 
+ Event >= bxxxxxxxx00110xxx && 
+ Event <= bxxxxxxxx01001xxx || 
+ Event >= bxxxxxxxx01100xxx && 
+ Event <= bxxxxxxxx01111xxx || 
+ Event >= bxxxxxxxx10010xxx && 
+ Event <= bxxxxxxxx10101xxx )              

@@ -28,6 +28,12 @@ download:
     # Fastest region is saved to ~/.autorxte/download_region.json
     # Options: us-east-1, us-west-2, eu-west-1, ap-south-1, ap-southeast-1, ap-northeast-1
     region: us-east-1
+
+    # Path template for an RXTE ObsID inside the bucket. HEASARC has reorganised
+    # this layout in the past (rxte/ -> xte/), so it lives here rather than in
+    # code. Substituted fields: {cycle}, {prnb}, {obsid}.
+    # Current layout (verified May 2026): xte/data/archive/AOn/Pnnnnn/<obsid>/
+    archive_prefix: "xte/data/archive/{cycle}/{prnb}/{obsid}/"
     
   # Auto-detection: Set to true to always auto-detect fastest region (slower first run)
   # Set to false to use the region specified above or saved preference

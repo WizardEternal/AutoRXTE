@@ -1,0 +1,6 @@
+ Event == b1xxxxxxxxxxxxxxx && 
+ (Event == bxxxxxxxx0000xxxx || 
+ Event == bxxxxxxxx0011xxxx || 
+ Event == bxxxxxxxx0110xxxx || 
+ Event == bxxxxxxxx1001xxxx || 
+ Event == bxxxxxxxx1100xxxx )                  

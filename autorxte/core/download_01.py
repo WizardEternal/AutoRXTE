@@ -33,6 +33,11 @@ DEFAULT_BUCKET = 'nasa-heasarc'
 DEFAULT_REGION = 'us-east-1'
 DEFAULT_CATALOG = 'xtemaster'
 
+# HEASARC reorganised the bucket layout in the past (rxte/ -> xte/). Keep the
+# template in one place (and overridable from autorxte_config.yaml) so a future
+# move is a one-line config change, not a hunt through the code.
+DEFAULT_ARCHIVE_PREFIX = "xte/data/archive/{cycle}/{prnb}/{obsid}/"
+
 # AWS regions to test (major global endpoints)
 POSSIBLE_REGIONS = [
     # US
@@ -174,17 +179,27 @@ def download_s3_prefix(
     keys = [o['Key'] for o in objs]
     sizes = {o['Key']: o['Size'] for o in objs}
     total_bytes = sum(sizes.values())
-    
+
+    if not keys:
+        # Common cause: archive layout changed (HEASARC moved rxte/ -> xte/ once
+        # already). Surface it loudly so it is not silently treated as success.
+        logger.warning(
+            f"S3 listing for prefix {prefix!r} returned 0 files. "
+            f"If this is unexpected, the bucket layout may have changed. "
+            f"Try: aws s3 ls --no-sign-request s3://{bucket}/  to inspect."
+        )
+        return 0, 0.0
+
     logger.info(f"Found {len(keys)} files ({human_readable_size(total_bytes)})")
-    
+
     if overwrite and record_file.exists():
         record_file.unlink()
-    
+
     downloaded = set()
     if record_file.exists():
         with open(record_file, 'r') as rf:
             downloaded = set(json.load(rf))
-    
+
     avg_kb = (total_bytes / len(keys) / 1024) if keys else 0
     workers = choose_max_workers(len(keys), avg_kb)
     logger.info(f"Using {workers} parallel workers")
@@ -322,17 +337,27 @@ def search_and_download(
             start_date = get_input("Start date (YYYY-MM-DD)", arg_value=start_date)
             end_date = get_input("End date (YYYY-MM-DD)", arg_value=end_date)
     else:
-        # Non-interactive mode - use defaults
+        # Non-interactive mode - use defaults, but require an explicit source.
+        if source is None:
+            raise ValueError(
+                "search_and_download(interactive=False) requires source. "
+                "Pass a name (e.g. 'GRS 1915+105') or 'RA DEC' in degrees."
+            )
         if catalog is None:
             catalog = DEFAULT_CATALOG
         if radius is None:
             radius = 5.0
         if output_dir is None:
             output_dir = Path('.')
-    
-    # S3 client
-    s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED), region_name=region)
-    
+
+    # S3 client. Pool size matches the worker cap in choose_max_workers (64) so
+    # parallel downloads don't trigger urllib3 "connection pool full" warnings.
+    s3 = boto3.client(
+        's3',
+        config=Config(signature_version=UNSIGNED, max_pool_connections=64),
+        region_name=region,
+    )
+
     # Parse position
     try:
         if bool(re.search(r'[A-Za-z]', source)):
@@ -343,30 +368,37 @@ def search_and_download(
         logger.error(f"Could not resolve source '{source}': {e}")
         logger.error("Try using coordinates like '83.633 22.015' instead")
         raise
-    
+
     logger.info(f"Searching {source} (RA={pos.ra.deg:.3f}, Dec={pos.dec.deg:.3f})")
-    
-    # Query HEASARC - don't assume 'cycle' column exists
+
+    # Query HEASARC. Request the columns the rest of this function depends on,
+    # so we don't depend on astroquery's default column set including 'cycle'.
     heas = Heasarc()
     try:
         tbl = heas.query_region(
             pos,
             catalog=catalog,
-            radius=(radius / 60.0) * u.deg
+            radius=(radius / 60.0) * u.deg,
+            columns='__row, cycle, obsid, target_name, exposure, time',
         )
     except Exception as e:
         logger.error(f"HEASARC query failed: {e}")
         raise
-    
+
+    if len(tbl) == 0:
+        logger.warning(f"No observations found for {source} in catalog {catalog}")
+        return
+
     tbl.sort('time')
     tbl = tbl[(tbl['time'] != "") & (tbl['obsid'] != "") & (tbl['exposure'] != "")]
-    
+
     logger.info(f"Found {len(tbl)} observations")
-    
-    # Apply filters
-    if min_exposure or start_date or end_date:
+
+    # Apply filters. Use `is not None` so min_exposure=0.0 is treated as a real
+    # filter rather than a no-op.
+    if (min_exposure is not None) or start_date or end_date:
         mask = np.ones(len(tbl), dtype=bool)
-        if min_exposure:
+        if min_exposure is not None:
             mask &= tbl['exposure'].astype(float) >= min_exposure
         if start_date or end_date:
             times = Time(tbl['time'], format='mjd')
@@ -377,6 +409,10 @@ def search_and_download(
                 mask &= np.array([t <= datetime.fromisoformat(end_date) for t in times_dt])
         tbl = tbl[mask]
         logger.info(f"After filters: {len(tbl)} observations")
+
+    if len(tbl) == 0:
+        logger.warning("No observations remain after filtering; nothing to download.")
+        return
     
     # Interactive download selection
     if interactive and obsids is None and top_n is None and bottom_n is None:
@@ -414,10 +450,15 @@ def search_and_download(
     
     logger.info(f"Downloading {len(links_data)} observations")
     
-    # Get source name for directory
+    # Pick the dominant target_name and sanitize it for a directory path.
+    # HEASARC sometimes returns names with spaces or unusual punctuation; keep
+    # alphanumerics, +, -, _, ., and collapse the rest to underscores.
     values, counts = np.unique(tbl['target_name'], return_counts=True)
-    source_name = values[np.argmax(counts)]
-    download_dir = Path(output_dir) / f"download_RXTE_{source_name}"
+    source_name = str(values[np.argmax(counts)])
+    safe_name = re.sub(r'[^\w+.-]+', '_', source_name).strip('_')
+    if not safe_name:
+        safe_name = 'source'
+    download_dir = Path(output_dir) / f"download_RXTE_{safe_name}"
     download_dir.mkdir(parents=True, exist_ok=True)
     
     # Interactive overwrite confirmation
@@ -426,16 +467,19 @@ def search_and_download(
     elif overwrite is None:
         overwrite = False
     
+    # Resolve archive prefix template once, from config (with hard-coded default).
+    archive_template = config.get('download.s3.archive_prefix', DEFAULT_ARCHIVE_PREFIX)
+
     # Download all
     for row in links_data:
         cycle = "AO" + str(row['cycle'])
         obsid = str(row['obsid'])
         prnb = 'P' + obsid[:5]
-        prefix = f"rxte/data/archive/{cycle}/{prnb}/{obsid}/"
-        
+        prefix = archive_template.format(cycle=cycle, prnb=prnb, obsid=obsid)
+
         logger.info(f"Downloading ObsID {obsid}")
         obs_dir = download_dir / obsid
-        record_file = download_dir / f"downloaded_RXTE_{source_name}.json"
+        record_file = download_dir / f"downloaded_RXTE_{safe_name}.json"
         
         bytes_dl, secs = download_s3_prefix(s3, prefix, obs_dir, record_file, bucket=bucket, overwrite=overwrite)
         speed = bytes_dl / secs if secs > 0 else 0

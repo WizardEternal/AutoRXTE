@@ -1,7 +1,12 @@
 """Advanced RXTE analysis features."""
 
 from autorxte.advanced.color_color_01 import extract_color_ranges, plot_color_diagrams
-from autorxte.advanced.xspec_fit_02 import fit_all_spectra
+from autorxte.advanced.xspec_fit_02 import (
+    fit_all_spectra,
+    apply_xcm_template,
+    rewrite_xcm_paths,
+    parse_xspec_log,
+)
 from autorxte.advanced.xenon_mode_03 import (
     create_xenon_god_files,
     move_xenon_god_files,
@@ -13,13 +18,15 @@ from autorxte.advanced.plotting_04 import (
     plot_single_lightcurve,
     plot_all_lightcurves,
     plot_multiple_lightcurves,
-    quick_plot
 )
 
 __all__ = [
     'extract_color_ranges',
     'plot_color_diagrams',
     'fit_all_spectra',
+    'apply_xcm_template',
+    'rewrite_xcm_paths',
+    'parse_xspec_log',
     'create_xenon_god_files',
     'move_xenon_god_files',
     'run_make_se',
@@ -28,5 +35,4 @@ __all__ = [
     'plot_single_lightcurve',
     'plot_all_lightcurves',
     'plot_multiple_lightcurves',
-    'quick_plot',
 ]

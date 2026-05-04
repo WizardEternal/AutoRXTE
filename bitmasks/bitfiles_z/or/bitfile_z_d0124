@@ -1,0 +1,3 @@
+ Event == b1xxxxxxxxxxxxxxx && 
+ (Event <= bxxxxxxxx10001xxx || 
+ Event >= bxxxxxxxx11000xxx )    
